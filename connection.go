@@ -1,21 +1,30 @@
 package tarantool
 
 import (
-	"net"
-	"fmt"
-	"github.com/vmihailenco/msgpack"
-	"sync/atomic"
+	"bufio"
 	"bytes"
+	"errors"
+	"io"
+	"log"
+	"net"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 type Connection struct {
-	connection net.Conn
-	mutex      *sync.Mutex
-	requestId  uint32
-	Greeting   *Greeting
-	requests   map[uint32]chan *Response
-	packets    chan []byte
+	addr      string
+	c         *net.TCPConn
+	r         *bufio.Reader
+	w         *bufio.Writer
+	mutex     *sync.Mutex
+	requestId uint32
+	Greeting  *Greeting
+	requests  map[uint32]*Future
+	packets   chan []byte
+	control   chan struct{}
+	opts      Opts
+	closed    bool
 }
 
 type Greeting struct {
@@ -23,118 +32,306 @@ type Greeting struct {
 	auth    string
 }
 
-func Connect(addr string) (conn *Connection, err error) {
-	fmt.Printf("Connecting to %s ...\n", addr)
-	connection, err := net.Dial("tcp", addr)
-	if err != nil {
-		return
+type Opts struct {
+	Timeout       time.Duration // milliseconds
+	Reconnect     time.Duration // milliseconds
+	MaxReconnects uint
+	User          string
+	Pass          string
+}
+
+func Connect(addr string, opts Opts) (conn *Connection, err error) {
+
+	conn = &Connection{
+		addr:      addr,
+		mutex:     &sync.Mutex{},
+		requestId: 0,
+		Greeting:  &Greeting{},
+		requests:  make(map[uint32]*Future),
+		packets:   make(chan []byte, 64),
+		control:   make(chan struct{}),
+		opts:      opts,
 	}
-	connection.(*net.TCPConn).SetNoDelay(true)
 
-	fmt.Println("Connected ...")
-
-	conn = &Connection{ connection, &sync.Mutex{}, 0, &Greeting{}, make(map[uint32]chan *Response), make(chan []byte) }
-	err = conn.handShake()
+	var reconnect time.Duration
+	// disable reconnecting for first connect
+	reconnect, conn.opts.Reconnect = conn.opts.Reconnect, 0
+	_, _, err = conn.createConnection()
+	conn.opts.Reconnect = reconnect
+	if err != nil && reconnect == 0 {
+		return nil, err
+	}
 
 	go conn.writer()
 	go conn.reader()
 
+	return conn, err
+}
+
+func (conn *Connection) Close() (err error) {
+	conn.closed = true
+	close(conn.control)
+	err = conn.closeConnection(errors.New("client closed connection"))
 	return
 }
 
-func (conn *Connection) handShake() (err error) {
-	fmt.Printf("Greeting ... ")
-	greeting := make([]byte, 128)
-	_, err = conn.connection.Read(greeting)
+func (conn *Connection) RemoteAddr() string {
+	conn.mutex.Lock()
+	defer conn.mutex.Unlock()
+	if conn.c == nil {
+		return ""
+	}
+	return conn.c.RemoteAddr().String()
+}
+
+func (conn *Connection) LocalAddr() string {
+	conn.mutex.Lock()
+	defer conn.mutex.Unlock()
+	if conn.c == nil {
+		return ""
+	}
+	return conn.c.LocalAddr().String()
+}
+
+func (conn *Connection) dial() (err error) {
+	connection, err := net.Dial("tcp", conn.addr)
 	if err != nil {
-		fmt.Println("Error")
+		return
+	}
+	c := connection.(*net.TCPConn)
+	c.SetNoDelay(true)
+	r := bufio.NewReaderSize(c, 128*1024)
+	w := bufio.NewWriter(c)
+	greeting := make([]byte, 128)
+	_, err = io.ReadFull(r, greeting)
+	if err != nil {
+		c.Close()
 		return
 	}
 	conn.Greeting.version = bytes.NewBuffer(greeting[:64]).String()
-	conn.Greeting.auth = bytes.NewBuffer(greeting[64:]).String()
+	conn.Greeting.auth = bytes.NewBuffer(greeting[64:108]).String()
 
-	fmt.Println("Success")
-	fmt.Println("Version:", conn.Greeting.version)
+	// Auth
+	if conn.opts.User != "" {
+		scr, err := scramble(conn.Greeting.auth, conn.opts.Pass)
+		if err != nil {
+			err = errors.New("auth: scrambling failure " + err.Error())
+			c.Close()
+			return err
+		}
+		if err = conn.writeAuthRequest(w, scr); err != nil {
+			c.Close()
+			return err
+		}
+		if err = conn.readAuthResponse(r); err != nil {
+			c.Close()
+			return err
+		}
+	}
+
+	// Only if connected and authenticated
+	conn.c = c
+	conn.r = r
+	conn.w = w
+
 	return
 }
 
-func (conn *Connection) writer(){
-	var (
-		err error
-		packet []byte
-	)
+func (conn *Connection) writeAuthRequest(w *bufio.Writer, scramble []byte) (err error) {
+	request := conn.NewRequest(AuthRequest)
+	request.body[KeyUserName] = conn.opts.User
+	request.body[KeyTuple] = []interface{}{string("chap-sha1"), string(scramble)}
+	packet, err := request.pack()
+	if err != nil {
+		return errors.New("auth: pack error " + err.Error())
+	}
+	if err := write(w, packet); err != nil {
+		return errors.New("auth: write error " + err.Error())
+	}
+	if err = w.Flush(); err != nil {
+		return errors.New("auth: flush error " + err.Error())
+	}
+	return
+}
+
+func (conn *Connection) readAuthResponse(r io.Reader) (err error) {
+	resp_bytes, err := read(r)
+	if err != nil {
+		return errors.New("auth: read error " + err.Error())
+	}
+	resp := Response{buf: smallBuf{b: resp_bytes}}
+	err = resp.decodeHeader()
+	if err != nil {
+		return errors.New("auth: decode response header error " + err.Error())
+	}
+	err = resp.decodeBody()
+	if err != nil {
+		switch err.(type) {
+		case Error:
+			return err
+		default:
+			return errors.New("auth: decode response body error " + err.Error())
+		}
+	}
+	return
+}
+
+func (conn *Connection) createConnection() (r *bufio.Reader, w *bufio.Writer, err error) {
+	conn.mutex.Lock()
+	defer conn.mutex.Unlock()
+	if conn.closed {
+		err = errors.New("connection already closed")
+		return
+	}
+	if conn.c == nil {
+		var reconnects uint
+		for {
+			err = conn.dial()
+			if err == nil {
+				break
+			} else if conn.opts.Reconnect > 0 {
+				if conn.opts.MaxReconnects > 0 && reconnects > conn.opts.MaxReconnects {
+					log.Printf("tarantool: last reconnect to %s failed: %s, giving it up.\n", conn.addr, err.Error())
+					return
+				} else {
+					log.Printf("tarantool: reconnect (%d/%d) to %s failed: %s\n", reconnects, conn.opts.MaxReconnects, conn.addr, err.Error())
+					reconnects += 1
+					time.Sleep(conn.opts.Reconnect)
+					continue
+				}
+			} else {
+				return
+			}
+		}
+	}
+	r = conn.r
+	w = conn.w
+	return
+}
+
+func (conn *Connection) closeConnection(neterr error) (err error) {
+	conn.mutex.Lock()
+	defer conn.mutex.Unlock()
+	if conn.c == nil {
+		return
+	}
+	err = conn.c.Close()
+	conn.c = nil
+	conn.r = nil
+	conn.w = nil
+	for rid, fut := range conn.requests {
+		fut.err = neterr
+		close(fut.c)
+		delete(conn.requests, rid)
+	}
+	return
+}
+
+func (conn *Connection) writer() {
+	var w *bufio.Writer
+	var err error
 	for {
-		packet = <- conn.packets
-		err = conn.write(packet)
-		if err != nil {
-			panic(err)
+		var packet []byte
+		select {
+		case packet = <-conn.packets:
+		default:
+			if w = conn.w; w != nil {
+				if err := w.Flush(); err != nil {
+					conn.closeConnection(err)
+				}
+			}
+			select {
+			case packet = <-conn.packets:
+			case <-conn.control:
+				return
+			}
+		}
+		if packet == nil {
+			return
+		}
+		if w = conn.w; w == nil {
+			if _, w, err = conn.createConnection(); err != nil {
+				return
+			}
+		}
+		if err := write(w, packet); err != nil {
+			conn.closeConnection(err)
+			continue
 		}
 	}
 }
 
 func (conn *Connection) reader() {
-	var (
-		err error
-		resp_bytes []byte
-	)
+	var r *bufio.Reader
+	var err error
 	for {
-		resp_bytes, err = conn.read()
-		if err != nil {
-			panic(err)
+		if r = conn.r; r == nil {
+			if r, _, err = conn.createConnection(); err != nil {
+				return
+			}
 		}
-
-		resp := NewResponse(resp_bytes)
-		respChan := conn.requests[resp.RequestId]
+		resp_bytes, err := read(r)
+		if err != nil {
+			conn.closeConnection(err)
+			continue
+		}
+		resp := Response{buf: smallBuf{b: resp_bytes}}
+		err = resp.decodeHeader()
+		//resp, err := newResponse(resp_bytes)
+		if err != nil {
+			conn.closeConnection(err)
+			continue
+		}
 		conn.mutex.Lock()
-		delete(conn.requests, resp.RequestId)
-		conn.mutex.Unlock()
-		respChan <- resp
+		if fut, ok := conn.requests[resp.RequestId]; ok {
+			delete(conn.requests, resp.RequestId)
+			fut.resp = resp
+			close(fut.c)
+			conn.mutex.Unlock()
+		} else {
+			conn.mutex.Unlock()
+			log.Printf("tarantool: unexpected requestId (%d) in response", uint(resp.RequestId))
+		}
 	}
 }
 
-func (conn *Connection) write(data []byte) (err error) {
-	l, err := conn.connection.Write(data)
+func write(w io.Writer, data []byte) (err error) {
+	l, err := w.Write(data)
+	if err != nil {
+		return
+	}
 	if l != len(data) {
 		panic("Wrong length writed")
 	}
 	return
 }
 
-func (conn *Connection) read() (response []byte, err error){
-	var length_uint uint32
-	var l, tl int
-	length := make([]byte, PacketLengthBytes)	
+func read(r io.Reader) (response []byte, err error) {
+	var lenbuf [PacketLengthBytes]byte
+	var length int
 
-	tl = 0
-	for tl < int(PacketLengthBytes) {
-		l, err = conn.connection.Read(length[tl:])
-		tl += l
-		if err != nil {
-			return
-		}
-	}
-
-    err = msgpack.Unmarshal(length, &length_uint)
-	if err != nil {
+	if _, err = io.ReadFull(r, lenbuf[:]); err != nil {
 		return
 	}
-
-	response = make([]byte, length_uint)
-	if(length_uint > 0){
-		tl = 0
-		for tl < int(length_uint) {
-			l, err = conn.connection.Read(response[tl:])
-			tl += l
-			if err != nil {
-				return
-			}
-		}
+	if lenbuf[0] != 0xce {
+		err = errors.New("Wrong reponse header")
+		return
 	}
+	length = (int(lenbuf[1]) << 24) +
+		(int(lenbuf[2]) << 16) +
+		(int(lenbuf[3]) << 8) +
+		int(lenbuf[4])
+
+	if length == 0 {
+		err = errors.New("Response should not be 0 length")
+		return
+	}
+	response = make([]byte, length)
+	_, err = io.ReadFull(r, response)
 
 	return
 }
 
 func (conn *Connection) nextRequestId() (requestId uint32) {
-	conn.requestId = atomic.AddUint32(&conn.requestId, 1)
-	return conn.requestId
+	return atomic.AddUint32(&conn.requestId, 1)
 }

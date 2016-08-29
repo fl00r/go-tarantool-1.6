@@ -1,8 +1,10 @@
 package tarantool
 
-import(
-	"github.com/vmihailenco/msgpack"
+import (
 	"errors"
+	"fmt"
+	"gopkg.in/vmihailenco/msgpack.v2"
+	"time"
 )
 
 type Request struct {
@@ -12,12 +14,21 @@ type Request struct {
 	body        map[int]interface{}
 }
 
+type Future struct {
+	conn *Connection
+	id   uint32
+	resp Response
+	err  error
+	c    chan struct{}
+	t    *time.Timer
+}
+
 func (conn *Connection) NewRequest(requestCode int32) (req *Request) {
 	req = &Request{}
-	req.conn        = conn
-	req.requestId   = conn.nextRequestId()
+	req.conn = conn
+	req.requestId = conn.nextRequestId()
 	req.requestCode = requestCode
-	req.body        = make(map[int]interface{})
+	req.body = make(map[int]interface{})
 
 	return
 }
@@ -28,117 +39,167 @@ func (conn *Connection) Ping() (resp *Response, err error) {
 	return
 }
 
+func (r *Request) fillSearch(spaceNo, indexNo uint32, key []interface{}) {
+	r.body[KeySpaceNo] = spaceNo
+	r.body[KeyIndexNo] = indexNo
+	r.body[KeyKey] = key
+}
+func (r *Request) fillIterator(offset, limit, iterator uint32) {
+	r.body[KeyIterator] = iterator
+	r.body[KeyOffset] = offset
+	r.body[KeyLimit] = limit
+}
+
+func (r *Request) fillInsert(spaceNo uint32, tuple []interface{}) {
+	r.body[KeySpaceNo] = spaceNo
+	r.body[KeyTuple] = tuple
+}
+
 func (conn *Connection) Select(spaceNo, indexNo, offset, limit, iterator uint32, key []interface{}) (resp *Response, err error) {
 	request := conn.NewRequest(SelectRequest)
-
-	request.body[KeySpaceNo]  = spaceNo
-	request.body[KeyIndexNo]  = indexNo
-	request.body[KeyIterator] = iterator
-	request.body[KeyOffset]   = offset
-	request.body[KeyLimit]    = limit
-	request.body[KeyKey]      = key
-	
+	request.fillSearch(spaceNo, indexNo, key)
+	request.fillIterator(offset, limit, iterator)
 	resp, err = request.perform()
 	return
 }
 
+func (conn *Connection) SelectTyped(spaceNo, indexNo, offset, limit, iterator uint32, key []interface{}, result interface{}) error {
+	request := conn.NewRequest(SelectRequest)
+	request.fillSearch(spaceNo, indexNo, key)
+	request.fillIterator(offset, limit, iterator)
+	return request.performTyped(result)
+}
+
 func (conn *Connection) Insert(spaceNo uint32, tuple []interface{}) (resp *Response, err error) {
 	request := conn.NewRequest(InsertRequest)
-
-	request.body[KeySpaceNo] = spaceNo
-	request.body[KeyTuple]   = tuple
-
+	request.fillInsert(spaceNo, tuple)
 	resp, err = request.perform()
 	return
 }
 
 func (conn *Connection) Replace(spaceNo uint32, tuple []interface{}) (resp *Response, err error) {
 	request := conn.NewRequest(ReplaceRequest)
-
-	request.body[KeySpaceNo] = spaceNo
-	request.body[KeyTuple]   = tuple
-
+	request.fillInsert(spaceNo, tuple)
 	resp, err = request.perform()
 	return
 }
 
 func (conn *Connection) Delete(spaceNo, indexNo uint32, key []interface{}) (resp *Response, err error) {
 	request := conn.NewRequest(DeleteRequest)
-
-	request.body[KeySpaceNo] = spaceNo
-	request.body[KeyIndexNo] = indexNo
-	request.body[KeyKey]     = key
-
+	request.fillSearch(spaceNo, indexNo, key)
 	resp, err = request.perform()
 	return
 }
 
-func (conn *Connection) Update(spaceNo, indexNo uint32, key, tuple []interface{}) (resp *Response, err error) {
+func (conn *Connection) Update(spaceNo, indexNo uint32, key, ops []interface{}) (resp *Response, err error) {
 	request := conn.NewRequest(UpdateRequest)
+	request.fillSearch(spaceNo, indexNo, key)
+	request.body[KeyTuple] = ops
+	resp, err = request.perform()
+	return
+}
 
+func (conn *Connection) Upsert(spaceNo uint32, tuple, ops []interface{}) (resp *Response, err error) {
+	request := conn.NewRequest(UpsertRequest)
 	request.body[KeySpaceNo] = spaceNo
-	request.body[KeyIndexNo] = indexNo
-	request.body[KeyKey]     = key
-	request.body[KeyTuple]   = tuple
-
+	request.body[KeyTuple] = tuple
+	request.body[KeyDefTuple] = ops
 	resp, err = request.perform()
 	return
 }
 
 func (conn *Connection) Call(functionName string, tuple []interface{}) (resp *Response, err error) {
 	request := conn.NewRequest(CallRequest)
-
 	request.body[KeyFunctionName] = functionName
-	request.body[KeyTuple]        = tuple
-
+	request.body[KeyTuple] = tuple
 	resp, err = request.perform()
 	return
 }
 
-//
-// To be implemented
-//
-func (conn *Connection) Auth(key, tuple []interface{}) (resp *Response, err error) {
+func (conn *Connection) Eval(expr string, tuple []interface{}) (resp *Response, err error) {
+	request := conn.NewRequest(EvalRequest)
+	request.body[KeyExpression] = expr
+	request.body[KeyTuple] = tuple
+	resp, err = request.perform()
 	return
 }
 
+func (conn *Connection) SelectAsync(spaceNo, indexNo, offset, limit, iterator uint32, key []interface{}) *Future {
+	request := conn.NewRequest(SelectRequest)
+	request.fillSearch(spaceNo, indexNo, key)
+	request.fillIterator(offset, limit, iterator)
+	return request.future()
+}
+
+func (conn *Connection) InsertAsync(spaceNo uint32, tuple []interface{}) *Future {
+	request := conn.NewRequest(InsertRequest)
+	request.fillInsert(spaceNo, tuple)
+	return request.future()
+}
+
+func (conn *Connection) ReplaceAsync(spaceNo uint32, tuple []interface{}) *Future {
+	request := conn.NewRequest(ReplaceRequest)
+	request.fillInsert(spaceNo, tuple)
+	return request.future()
+}
+
+func (conn *Connection) DeleteAsync(spaceNo, indexNo uint32, key []interface{}) *Future {
+	request := conn.NewRequest(DeleteRequest)
+	request.fillSearch(spaceNo, indexNo, key)
+	return request.future()
+}
+
+func (conn *Connection) UpdateAsync(spaceNo, indexNo uint32, key, ops []interface{}) *Future {
+	request := conn.NewRequest(UpdateRequest)
+	request.fillSearch(spaceNo, indexNo, key)
+	request.body[KeyTuple] = ops
+	return request.future()
+}
+
+func (conn *Connection) UpsertAsync(spaceNo uint32, tuple, ops []interface{}) *Future {
+	request := conn.NewRequest(UpsertRequest)
+	request.body[KeySpaceNo] = spaceNo
+	request.body[KeyTuple] = tuple
+	request.body[KeyDefTuple] = ops
+	return request.future()
+}
+
+func (conn *Connection) CallAsync(functionName string, tuple []interface{}) *Future {
+	request := conn.NewRequest(CallRequest)
+	request.body[KeyFunctionName] = functionName
+	request.body[KeyTuple] = tuple
+	return request.future()
+}
+
+func (conn *Connection) EvalAsync(expr string, tuple []interface{}) *Future {
+	request := conn.NewRequest(EvalRequest)
+	request.body[KeyExpression] = expr
+	request.body[KeyTuple] = tuple
+	return request.future()
+}
 
 //
 // private
 //
 
-
 func (req *Request) perform() (resp *Response, err error) {
-	packet, err := req.pack()
-	if err != nil {
-		return
-	}
+	return req.future().Get()
+}
 
-	responseChan := make(chan *Response)
-
-	req.conn.mutex.Lock()
-	req.conn.requests[req.requestId] = responseChan
-	req.conn.mutex.Unlock()
-
-	req.conn.packets <- (packet)
-	resp = <-responseChan
-
-	if resp.Error != "" {
-		err = errors.New(resp.Error)
-	}
-	return
+func (req *Request) performTyped(res interface{}) (err error) {
+	return req.future().GetTyped(res)
 }
 
 func (req *Request) pack() (packet []byte, err error) {
-	var header, body, packetLength []byte
-
-	msg_header := make(map[int]interface{})
-	msg_header[KeyCode] = req.requestCode
-	msg_header[KeySync] = req.requestId
-
-	header, err = msgpack.Marshal(msg_header)
-	if err != nil {
-		return
+	var body []byte
+	rid := req.requestId
+	h := [...]byte{
+		0xce, 0, 0, 0, 0, // length
+		0x82,                           // 2 element map
+		KeyCode, byte(req.requestCode), // request code
+		KeySync, 0xce,
+		byte(rid >> 24), byte(rid >> 16),
+		byte(rid >> 8), byte(rid),
 	}
 
 	body, err = msgpack.Marshal(req.body)
@@ -146,14 +207,94 @@ func (req *Request) pack() (packet []byte, err error) {
 		return
 	}
 
-	length := uint32(len(header) + len(body))
-	packetLength, err = msgpack.Marshal(length)
-	if err != nil {
+	l := uint32(len(h) - 5 + len(body))
+	h[1] = byte(l >> 24)
+	h[2] = byte(l >> 16)
+	h[3] = byte(l >> 8)
+	h[4] = byte(l)
+
+	packet = append(h[:], body...)
+	return
+}
+
+func (req *Request) future() (f *Future) {
+	f = &Future{
+		conn: req.conn,
+		id:   req.requestId,
+		c:    make(chan struct{}),
+	}
+
+	// check connection ready to process packets
+	if c := f.conn.c; c == nil {
+		close(f.c)
+		f.err = errors.New("client connection is not ready")
+		return // we shouldn't perform this request
+	}
+
+	var packet []byte
+	if packet, f.err = req.pack(); f.err != nil {
+		close(f.c)
 		return
 	}
 
-	packet = append(packet, packetLength...)
-	packet = append(packet, header...)
-	packet = append(packet, body...)
+	req.conn.mutex.Lock()
+	if req.conn.closed {
+		req.conn.mutex.Unlock()
+		f.err = errors.New("using closed connection")
+		close(f.c)
+		return
+	}
+
+	req.conn.requests[req.requestId] = f
+	req.conn.mutex.Unlock()
+	req.conn.packets <- (packet)
+
+	if req.conn.opts.Timeout > 0 {
+		f.t = time.NewTimer(req.conn.opts.Timeout)
+	}
 	return
+}
+
+func (f *Future) wait() {
+	select {
+	case <-f.c:
+	default:
+		if t := f.t; t != nil {
+			select {
+			case <-f.c:
+			case <-t.C:
+				f.conn.mutex.Lock()
+				if _, ok := f.conn.requests[f.id]; ok {
+					delete(f.conn.requests, f.id)
+					close(f.c)
+					f.err = fmt.Errorf("client timeout for request %d", f.id)
+				}
+				f.conn.mutex.Unlock()
+			}
+		} else {
+			<-f.c
+		}
+	}
+	if f.t != nil {
+		f.t.Stop()
+		f.t = nil
+	}
+}
+
+func (f *Future) Get() (*Response, error) {
+	f.wait()
+	if f.err != nil {
+		return &f.resp, f.err
+	}
+	f.err = f.resp.decodeBody()
+	return &f.resp, f.err
+}
+
+func (f *Future) GetTyped(r interface{}) error {
+	f.wait()
+	if f.err != nil {
+		return f.err
+	}
+	f.err = f.resp.decodeBodyTyped(r)
+	return f.err
 }
