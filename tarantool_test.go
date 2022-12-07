@@ -3634,6 +3634,26 @@ func TestWatcher_Unregister_concurrent(t *testing.T) {
 	wg.Wait()
 }
 
+func TestSessionSettings(t *testing.T) {
+	conn := test_helpers.ConnectWithValidation(t, server, opts)
+	defer conn.Close()
+
+	resp, err := conn.GetSessionSetting(SessionSQLDefaultEngine)
+
+	require.Nil(t, err)
+	require.Equal(t, resp, "memtx")
+
+	resp, err = conn.SetSessionSetting(SessionSQLDefaultEngine, "vinyl")
+
+	require.Nil(t, err)
+	require.Equal(t, resp, "vinyl")
+
+	resp, err = conn.GetSessionSetting(SessionSQLDefaultEngine)
+
+	require.Nil(t, err)
+	require.Equal(t, resp, "vinyl")
+}
+
 // runTestMain is a body of TestMain function
 // (see https://pkg.go.dev/testing#hdr-Main).
 // Using defer + os.Exit is not works so TestMain body
