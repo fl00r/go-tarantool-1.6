@@ -3664,6 +3664,8 @@ func TestClientErrorIs(t *testing.T) {
 }
 
 func TestSessionSettings(t *testing.T) {
+	test_helpers.SkipIfSessionSettingsUnsupported(t)
+
 	conn := test_helpers.ConnectWithValidation(t, server, opts)
 	defer conn.Close()
 
@@ -3681,6 +3683,19 @@ func TestSessionSettings(t *testing.T) {
 
 	require.Nil(t, err)
 	require.Equal(t, resp, "vinyl")
+}
+
+func TestSessionSettingsNotSupported(t *testing.T) {
+	test_helpers.SkipIfSessionSettingsSupported(t)
+
+	conn := test_helpers.ConnectWithValidation(t, server, opts)
+	defer conn.Close()
+
+	resp, err := conn.GetSessionSetting(SessionSQLDefaultEngine)
+
+	require.Nil(t, resp)
+	require.NotNil(t, err)
+	require.ErrorContains(t, err, "session settings are not supported")
 }
 
 // runTestMain is a body of TestMain function

@@ -1,6 +1,7 @@
 package tarantool
 
 import (
+	"errors"
 	"fmt"
 )
 
@@ -90,6 +91,14 @@ func getSessionSettingValue(k SessionSetting, resp *Response) (interface{}, erro
 	return tuple[sessionSettingValueField], nil
 }
 
+func wrapSessionRequestError(err error) error {
+	if errors.Is(err, ClientError{Code: ErrSpaceNotFound}) {
+		err = fmt.Errorf("session settings are not supported: %w", err)
+	}
+
+	return err
+}
+
 func (conn *Connection) SetSessionSetting(k SessionSetting, v interface{}) (interface{}, error) {
 	req := NewUpdateRequest(sessionSettingsSpace).
 		Key(sessionSettingKey{k}).
@@ -97,7 +106,7 @@ func (conn *Connection) SetSessionSetting(k SessionSetting, v interface{}) (inte
 
 	resp, err := conn.Do(req).Get()
 	if err != nil {
-		return nil, err
+		return nil, wrapSessionRequestError(err)
 	}
 
 	return getSessionSettingValue(k, resp)
@@ -110,7 +119,7 @@ func (conn *Connection) GetSessionSetting(k SessionSetting) (interface{}, error)
 
 	resp, err := conn.Do(req).Get()
 	if err != nil {
-		return nil, err
+		return nil, wrapSessionRequestError(err)
 	}
 
 	return getSessionSettingValue(k, resp)

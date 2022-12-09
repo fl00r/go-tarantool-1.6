@@ -142,6 +142,23 @@ func SkipIfIdSupported(t *testing.T) {
 	skipIfGreaterOrEqual(t, "id requests", 2, 10, 0)
 }
 
+// SkipIfSessionSettingsSupported skips test run if Tarantool without
+// session settings support is used.
+func SkipIfSessionSettingsUnsupported(t *testing.T) {
+	t.Helper()
+
+	skipIfLess(t, "session settings", 2, 3, 1)
+}
+
+// SkipIfSessionSettingsSupported skips test run if Tarantool with
+// session settings support is used. Skip is useful for tests validating
+// that user gets useful error for older instances.
+func SkipIfSessionSettingsSupported(t *testing.T) {
+	t.Helper()
+
+	skipIfGreaterOrEqual(t, "session settings", 2, 3, 1)
+}
+
 // CheckEqualBoxErrors checks equivalence of tarantool.BoxError objects.
 //
 // Tarantool errors are not comparable by nature:
