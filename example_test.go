@@ -51,7 +51,7 @@ func ExampleConnection_Select() {
 	conn.Replace(spaceNo, []interface{}{uint(1111), "hello", "world"})
 	conn.Replace(spaceNo, []interface{}{uint(1112), "hallo", "werld"})
 
-	resp, err := conn.Select(517, 0, 0, 100, tarantool.IterEq, []interface{}{uint(1111)})
+	resp, err := conn.Select(617, 0, 0, 100, tarantool.IterEq, []interface{}{uint(1111)})
 
 	if err != nil {
 		fmt.Printf("error in select is %v", err)
@@ -75,7 +75,7 @@ func ExampleConnection_SelectTyped() {
 	defer conn.Close()
 	var res []Tuple
 
-	err := conn.SelectTyped(517, 0, 0, 100, tarantool.IterEq, tarantool.IntKey{1111}, &res)
+	err := conn.SelectTyped(617, 0, 0, 100, tarantool.IterEq, tarantool.IntKey{1111}, &res)
 
 	if err != nil {
 		fmt.Printf("error in select is %v", err)
@@ -96,7 +96,7 @@ func ExampleConnection_SelectTyped() {
 func ExampleConnection_SelectAsync() {
 	conn := example_connect(opts)
 	defer conn.Close()
-	spaceNo := uint32(517)
+	spaceNo := uint32(617)
 
 	conn.Insert(spaceNo, []interface{}{uint(16), "test", "one"})
 	conn.Insert(spaceNo, []interface{}{uint(17), "test", "one"})
@@ -223,7 +223,7 @@ func ExampleSelectRequest() {
 	conn := example_connect(opts)
 	defer conn.Close()
 
-	req := tarantool.NewSelectRequest(517).
+	req := tarantool.NewSelectRequest(617).
 		Limit(100).
 		Key(tarantool.IntKey{1111})
 	resp, err := conn.Do(req).Get()
