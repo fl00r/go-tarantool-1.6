@@ -2,6 +2,7 @@ package tarantool_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -3632,6 +3633,34 @@ func TestWatcher_Unregister_concurrent(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestClientErrorIs(t *testing.T) {
+	var is bool
+
+	is = errors.Is(
+		ClientError{ErrSpaceNotFound, "there is no space with name test"},
+		ClientError{ErrSpaceNotFound, "there is no space with id 513"},
+	)
+	require.Equalf(t, true, is, "errors.Is is true for errors with the same code")
+
+	is = errors.Is(
+		ClientError{ErrSpaceNotFound, "there is no space with name test"},
+		ClientError{ErrSchemaNotLoaded, "Schema is not loaded"},
+	)
+	require.Equalf(t, false, is, "errors.Is is false for errors with different codes")
+
+	is = errors.Is(
+		ClientError{ErrSpaceNotFound, "there is no space with name test"},
+		errors.New("something went wrong"),
+	)
+	require.Equalf(t, false, is, "errors.Is is false for errors of different type")
+
+	is = errors.Is(
+		errors.New("something went wrong"),
+		ClientError{ErrSpaceNotFound, "there is no space with name test"},
+	)
+	require.Equalf(t, false, is, "errors.Is is false for errors of different type")
 }
 
 func TestSessionSettings(t *testing.T) {

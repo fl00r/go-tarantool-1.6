@@ -30,6 +30,15 @@ func (clierr ClientError) Error() string {
 	return fmt.Sprintf("%s (0x%x)", clierr.Msg, clierr.Code)
 }
 
+// Is checks if errors have the same nature.
+func (clierr ClientError) Is(target error) bool {
+	tgt, ok := target.(ClientError)
+	if !ok {
+		return false
+	}
+	return clierr.Code == tgt.Code
+}
+
 // Temporary returns true if next attempt to perform request may succeeded.
 //
 // Currently it returns true when:
@@ -55,6 +64,9 @@ const (
 	ErrProtocolError      = 0x4000 + iota
 	ErrTimeouted          = 0x4000 + iota
 	ErrRateLimited        = 0x4000 + iota
+	ErrSchemaNotLoaded    = 0x4000 + iota
+	ErrSpaceNotFound      = 0x4000 + iota
+	ErrSpaceIndexNotFound = 0x4000 + iota
 )
 
 // Tarantool server error codes.

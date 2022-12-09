@@ -344,11 +344,19 @@ func (schema *Schema) ResolveSpaceIndex(s interface{}, i interface{}) (spaceNo, 
 	switch s := s.(type) {
 	case string:
 		if schema == nil {
-			err = fmt.Errorf("Schema is not loaded")
+			err = ClientError{
+				Code: ErrSchemaNotLoaded,
+				Msg:  "Schema is not loaded",
+			}
+
 			return
 		}
 		if space, ok = schema.Spaces[s]; !ok {
-			err = fmt.Errorf("there is no space with name %s", s)
+			err = ClientError{
+				Code: ErrSpaceNotFound,
+				Msg:  fmt.Sprintf("there is no space with name %s", s),
+			}
+
 			return
 		}
 		spaceNo = space.Id
@@ -384,17 +392,25 @@ func (schema *Schema) ResolveSpaceIndex(s interface{}, i interface{}) (spaceNo, 
 		switch i := i.(type) {
 		case string:
 			if schema == nil {
-				err = fmt.Errorf("Schema is not loaded")
-				return
+				err = ClientError{
+					Code: ErrSchemaNotLoaded,
+					Msg:  "Schema is not loaded",
+				}
 			}
 			if space == nil {
 				if space, ok = schema.SpacesById[spaceNo]; !ok {
-					err = fmt.Errorf("there is no space with id %d", spaceNo)
+					err = ClientError{
+						Code: ErrSpaceNotFound,
+						Msg:  fmt.Sprintf("there is no space with id %d", spaceNo),
+					}
 					return
 				}
 			}
 			if index, ok = space.Indexes[i]; !ok {
-				err = fmt.Errorf("space %s has not index with name %s", space.Name, i)
+				err = ClientError{
+					Code: ErrSpaceIndexNotFound,
+					Msg:  fmt.Sprintf("space %s has not index with name %s", space.Name, i),
+				}
 				return
 			}
 			indexNo = index.Id
