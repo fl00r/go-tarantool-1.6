@@ -62,7 +62,7 @@ func (k sessionSettingKey) EncodeMsgpack(enc *encoder) error {
 	return nil
 }
 
-func getSessionSettingValue(k SessionSetting, resp *Response) (interface{}, error) {
+func sessionSettingValue(k SessionSetting, resp *Response) (interface{}, error) {
 	if resp == nil {
 		return nil, fmt.Errorf("unexpected session settings response: got nil")
 	}
@@ -109,10 +109,10 @@ func (conn *Connection) SetSessionSetting(k SessionSetting, v interface{}) (inte
 		return nil, wrapSessionRequestError(err)
 	}
 
-	return getSessionSettingValue(k, resp)
+	return sessionSettingValue(k, resp)
 }
 
-func (conn *Connection) GetSessionSetting(k SessionSetting) (interface{}, error) {
+func (conn *Connection) SessionSetting(k SessionSetting) (interface{}, error) {
 	req := NewSelectRequest(sessionSettingsSpace).
 		Key(sessionSettingKey{k}).
 		Limit(1)
@@ -122,5 +122,5 @@ func (conn *Connection) GetSessionSetting(k SessionSetting) (interface{}, error)
 		return nil, wrapSessionRequestError(err)
 	}
 
-	return getSessionSettingValue(k, resp)
+	return sessionSettingValue(k, resp)
 }

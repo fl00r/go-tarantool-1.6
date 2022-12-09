@@ -3669,7 +3669,7 @@ func TestSessionSettings(t *testing.T) {
 	conn := test_helpers.ConnectWithValidation(t, server, opts)
 	defer conn.Close()
 
-	resp, err := conn.GetSessionSetting(SessionSQLDefaultEngine)
+	resp, err := conn.SessionSetting(SessionSQLDefaultEngine)
 
 	require.Nil(t, err)
 	require.Equal(t, resp, "memtx")
@@ -3679,7 +3679,7 @@ func TestSessionSettings(t *testing.T) {
 	require.Nil(t, err)
 	require.Equal(t, resp, "vinyl")
 
-	resp, err = conn.GetSessionSetting(SessionSQLDefaultEngine)
+	resp, err = conn.SessionSetting(SessionSQLDefaultEngine)
 
 	require.Nil(t, err)
 	require.Equal(t, resp, "vinyl")
@@ -3691,7 +3691,7 @@ func TestSessionSettingsNotSupported(t *testing.T) {
 	conn := test_helpers.ConnectWithValidation(t, server, opts)
 	defer conn.Close()
 
-	resp, err := conn.GetSessionSetting(SessionSQLDefaultEngine)
+	resp, err := conn.SessionSetting(SessionSQLDefaultEngine)
 
 	require.Nil(t, resp)
 	require.NotNil(t, err)
