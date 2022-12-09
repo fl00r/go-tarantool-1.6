@@ -3704,6 +3704,30 @@ func TestSessionSettingsNotSupported(t *testing.T) {
 	require.ErrorContains(t, err, "session settings are not supported")
 }
 
+func TestSessionErrorMarshalingEnabled(t *testing.T) {
+	test_helpers.SkipIfSessionErrorMarshalingEnabledUnsupported(t)
+
+	conn := test_helpers.ConnectWithValidation(t, server, opts)
+	defer conn.Close()
+
+	val, err := conn.SetSessionSetting(SessionErrorMarshalingEnabled, false)
+	require.Nil(t, err)
+	require.Equal(t, val, false)
+
+	resp, rerr := conn.Eval("return simple_error", []interface{}{})
+	require.Nil(t, rerr)
+	require.NotNil(t, resp)
+	require.IsType(t, "string", resp.Data[0])
+
+	val, err = conn.SetSessionSetting(SessionErrorMarshalingEnabled, true)
+	require.Nil(t, err)
+	require.Equal(t, val, true)
+
+	resp, rerr = conn.Eval("return simple_error", []interface{}{})
+	require.Nil(t, rerr)
+	require.NotNil(t, resp)
+	require.IsType(t, BoxError{}, resp.Data[0])
+}
 // runTestMain is a body of TestMain function
 // (see https://pkg.go.dev/testing#hdr-Main).
 // Using defer + os.Exit is not works so TestMain body
