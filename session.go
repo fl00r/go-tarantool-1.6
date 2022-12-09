@@ -4,33 +4,50 @@ import (
 	"fmt"
 )
 
+// SessionSetting describes a connection session setting.
 type SessionSetting string
 
 const sessionSettingsSpace string = "_session_settings"
 
-// In Go and IPROTO count start with 0.
+// In Go and IPROTO_UPDATE count starts with 0.
 const sessionSettingValueField int = 1
 
 const (
-	// whether error objects have a special structure. Default = false.
+	// SessionErrorMarshalingEnabled defines whether error objects
+	// have a special structure. Added in Tarantool 2.4.1, dropped
+	// in Tarantool 2.10.0 in favor of ErrorExtensionFeature protocol
+	// feature. Default is `false`.
 	SessionErrorMarshalingEnabled SessionSetting = "error_marshaling_enabled"
-	// default storage engine for new SQL tables. Default = ‘memtx’.
+	// SessionSQLDefaultEngine defined default storage engine for
+	// new SQL tables. Added in Tarantool 2.3.1. Default is `"memtx"`.
 	SessionSQLDefaultEngine SessionSetting = "sql_default_engine"
-	// whether foreign-key checks can wait till commit. Default = false.
+	// SessionSQLDeferForeignKeys defines whether foreign-key checks
+	// can wait till commit. Added in Tarantool 2.3.1. Default is `false`.
 	SessionSQLDeferForeignKeys SessionSetting = "sql_defer_foreign_keys"
-	// no effect at this time. Default = false.
+	// SessionSQLFullColumnNames defines whether full column names is displayed
+	// in SQL result set metadata. Added in Tarantool 2.3.1. Default is `false`.
 	SessionSQLFullColumnNames SessionSetting = "sql_full_column_names"
-	// whether SQL result set metadata will have more than just name and type. Default = false.
+	// SessionSQLFullMetadata defines whether SQL result set metadata will have
+	// more than just name and type. Added in Tarantool 2.3.1. Default is `false`.
 	SessionSQLFullMetadata SessionSetting = "sql_full_metadata"
-	// whether to show parser steps for following statements. Default = false.
+	// SessionSQLParserDebug defines whether to show parser steps for following
+	// statements. Option has no effect unless Tarantool was built with
+	// `-DCMAKE_BUILD_TYPE=Debug`. Added in Tarantool 2.3.1. Default is `false`.
 	SessionSQLParserDebug SessionSetting = "sql_parser_debug"
-	// whether a triggered statement can activate a trigger. Default = true.
+	// SessionSQLParserDebug defines whether a triggered statement can activate
+	// a trigger. Added in Tarantool 2.3.1. Default is `true`.
 	SessionSQLRecursiveTriggers SessionSetting = "sql_recursive_triggers"
-	// whether result rows are usually in reverse order if there is no ORDER BY clause. Default = false.
+	// SessionSQLReverseUnorderedSelects defines whether result rows are usually
+	// in reverse order if there is no ORDER BY clause. Added in Tarantool 2.3.1.
+	// Default is `false`.
 	SessionSQLReverseUnorderedSelects SessionSetting = "sql_reverse_unordered_selects"
-	// whether to show execution steps during SELECT. Default = false.
+	// SessionSQLSelectDebug defines whether to show execution steps during SELECT.
+	// Option has no effect unless Tarantool was built with  `-DCMAKE_BUILD_TYPE=Debug`.
+	// Added in Tarantool 2.3.1. Default is `false`.
 	SessionSQLSelectDebug SessionSetting = "sql_select_debug"
-	// for use by Tarantool’s developers. Default = false.
+	// SessionSQLVDBEDebug defines whether VDBE debug mode is enabled.
+	// Option has no effect unless Tarantool was built with  `-DCMAKE_BUILD_TYPE=Debug`.
+	// Added in Tarantool 2.3.1. Default is `false`.
 	SessionSQLVDBEDebug SessionSetting = "sql_vdbe_debug"
 )
 
@@ -44,9 +61,13 @@ func (k sessionSettingKey) EncodeMsgpack(enc *encoder) error {
 	return nil
 }
 
-func getSessionSettingValue(resp *Response) (interface{}, error) {
+func getSessionSettingValue(k SessionSetting, resp *Response) (interface{}, error) {
 	if resp == nil {
 		return nil, fmt.Errorf("unexpected session settings response: got nil")
+	}
+
+	if len(resp.Data) == 0 {
+		return nil, fmt.Errorf("session setting %s not found", k)
 	}
 
 	if len(resp.Data) != 1 {
@@ -79,7 +100,7 @@ func (conn *Connection) SetSessionSetting(k SessionSetting, v interface{}) (inte
 		return nil, err
 	}
 
-	return getSessionSettingValue(resp)
+	return getSessionSettingValue(k, resp)
 }
 
 func (conn *Connection) GetSessionSetting(k SessionSetting) (interface{}, error) {
@@ -92,5 +113,5 @@ func (conn *Connection) GetSessionSetting(k SessionSetting) (interface{}, error)
 		return nil, err
 	}
 
-	return getSessionSettingValue(resp)
+	return getSessionSettingValue(k, resp)
 }
