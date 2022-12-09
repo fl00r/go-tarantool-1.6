@@ -3728,6 +3728,37 @@ func TestSessionErrorMarshalingEnabled(t *testing.T) {
 	require.NotNil(t, resp)
 	require.IsType(t, BoxError{}, resp.Data[0])
 }
+
+func TestSessionSQLDefaultEngine(t *testing.T) {
+	test_helpers.SkipIfSessionSettingsUnsupported(t)
+
+	conn := test_helpers.ConnectWithValidation(t, server, opts)
+	defer conn.Close()
+
+	val, err := conn.SetSessionSetting(SessionSQLDefaultEngine, "vinyl")
+	require.Nil(t, err)
+	require.Equal(t, val, "vinyl")
+
+	_, err = conn.Execute("CREATE TABLE t1_vinyl(a INT PRIMARY KEY, b INT, c INT);", []interface{}{})
+	require.Nil(t, err)
+
+	resp, rerr := conn.Eval("return box.space['T1_VINYL'].engine", []interface{}{})
+	require.Nil(t, rerr)
+	require.NotNil(t, resp)
+	require.Equal(t, "vinyl", resp.Data[0])
+
+	val, err = conn.SetSessionSetting(SessionSQLDefaultEngine, "memtx")
+	require.Nil(t, err)
+	require.Equal(t, val, "memtx")
+
+	_, err = conn.Execute("CREATE TABLE t2_memtx(a INT PRIMARY KEY, b INT, c INT);", []interface{}{})
+	require.Nil(t, err)
+
+	resp, rerr = conn.Eval("return box.space['T2_MEMTX'].engine", []interface{}{})
+	require.Nil(t, rerr)
+	require.NotNil(t, resp)
+	require.Equal(t, "memtx", resp.Data[0])
+}
 // runTestMain is a body of TestMain function
 // (see https://pkg.go.dev/testing#hdr-Main).
 // Using defer + os.Exit is not works so TestMain body
