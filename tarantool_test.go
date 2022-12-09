@@ -3730,6 +3730,7 @@ func TestSessionErrorMarshalingEnabled(t *testing.T) {
 }
 
 func TestSessionSQLDefaultEngine(t *testing.T) {
+	// https: //github.com/tarantool/tarantool/blob/680990a082374e4790539215f69d9e9ee39c3307/test/sql/engine.test.lua
 	test_helpers.SkipIfSessionSettingsUnsupported(t)
 
 	conn := test_helpers.ConnectWithValidation(t, server, opts)
@@ -3739,10 +3740,12 @@ func TestSessionSQLDefaultEngine(t *testing.T) {
 	require.Nil(t, err)
 	require.Equal(t, val, "vinyl")
 
-	_, err = conn.Execute("CREATE TABLE t1_vinyl(a INT PRIMARY KEY, b INT, c INT);", []interface{}{})
-	require.Nil(t, err)
+	resp, rerr := conn.Execute("CREATE TABLE t1_vinyl(a INT PRIMARY KEY, b INT, c INT);", []interface{}{})
+	require.Nil(t, rerr)
+	require.NotNil(t, resp)
+	require.Equal(t, uint64(1), resp.SQLInfo.AffectedCount)
 
-	resp, rerr := conn.Eval("return box.space['T1_VINYL'].engine", []interface{}{})
+	resp, rerr = conn.Eval("return box.space['T1_VINYL'].engine", []interface{}{})
 	require.Nil(t, rerr)
 	require.NotNil(t, resp)
 	require.Equal(t, "vinyl", resp.Data[0])
@@ -3751,14 +3754,94 @@ func TestSessionSQLDefaultEngine(t *testing.T) {
 	require.Nil(t, err)
 	require.Equal(t, val, "memtx")
 
-	_, err = conn.Execute("CREATE TABLE t2_memtx(a INT PRIMARY KEY, b INT, c INT);", []interface{}{})
-	require.Nil(t, err)
+	resp, rerr = conn.Execute("CREATE TABLE t2_memtx(a INT PRIMARY KEY, b INT, c INT);", []interface{}{})
+	require.Nil(t, rerr)
+	require.NotNil(t, resp)
+	require.Equal(t, uint64(1), resp.SQLInfo.AffectedCount)
 
 	resp, rerr = conn.Eval("return box.space['T2_MEMTX'].engine", []interface{}{})
 	require.Nil(t, rerr)
 	require.NotNil(t, resp)
 	require.Equal(t, "memtx", resp.Data[0])
 }
+
+// func TestSessionSQLDeferForeignKeys(t *testing.T) {
+// 	// https://github.com/tarantool/tarantool/blob/eafadc13425f14446d7aaa49dea67dfc1d5f45e9/test/sql/transitive-transactions.result
+// 	test_helpers.SkipIfSessionSQLDeferForeignKeysUnsupported(t)
+
+// 	conn := test_helpers.ConnectWithValidation(t, server, opts)
+// 	defer conn.Close()
+
+// 	resp, rerr := conn.Execute("CREATE TABLE parent(id INT PRIMARY KEY, y INT UNIQUE);", []interface{}{})
+// 	require.Nil(t, rerr)
+// 	require.NotNil(t, resp)
+// 	require.Equal(t, uint64(1), resp.SQLInfo.AffectedCount)
+
+// 	resp, rerr = conn.Execute("CREATE TABLE child(id INT PRIMARY KEY, x INT REFERENCES parent(y) DEFERRABLE INITIALLY DEFERRED);", []interface{}{})
+// 	require.Nil(t, rerr)
+// 	require.NotNil(t, resp)
+// 	require.Equal(t, uint64(1), resp.SQLInfo.AffectedCount)
+
+// 	resp, rerr = conn.Execute("INSERT INTO parent VALUES (1, 1);", []interface{}{})
+// 	require.Nil(t, rerr)
+// 	require.NotNil(t, resp)
+// 	require.Equal(t, uint64(1), resp.SQLInfo.AffectedCount)
+
+// 	// resp, rerr = conn.Execute("INSERT INTO child VALUES (2, 2);", []interface{}{})
+// 	// require.Nil(t, rerr)
+// 	// require.NotNil(t, resp)
+// 	// require.Equal(t, uint64(1), resp.SQLInfo.AffectedCount)
+
+// 	// deferEval := `
+// 	//     box.begin()
+// 	//     local _, err = box.execute(';')
+// 	//     if err ~= nil then
+// 	//         return err
+// 	//     end
+// 	//     box.execute('INSERT INTO parent VALUES (2, 2);')
+// 	//     box.commit()
+// 	//     return true
+// 	// `
+// 	val, err := conn.SetSessionSetting(SessionSQLDeferForeignKeys, false)
+// 	require.Nil(t, err)
+// 	require.Equal(t, val, false)
+
+// 	val, err = conn.SessionSetting(SessionSQLDeferForeignKeys)
+// 	require.Nil(t, err)
+// 	require.Equal(t, val, false)
+
+// 	stream, err := conn.NewStream()
+// 	require.Nil(t, err)
+
+// 	// Begin transaction
+// 	req := NewBeginRequest()
+// 	resp, err = stream.Do(req).Get()
+// 	require.Nil(t, err)
+
+// 	// Insert in stream
+// 	req2 := NewExecuteRequest("INSERT INTO child VALUES (1, 2)")
+// 	resp, err = stream.Do(req2).Get()
+// 	require.Nil(t, err)
+
+// 	req3 := NewCommitRequest()
+// 	resp, err = stream.Do(req3).Get()
+// 	require.Nil(t, err)
+
+// 	// resp, rerr = conn.Eval(deferEval, []interface{}{})
+// 	// require.Nil(t, rerr)
+// 	// require.NotNil(t, resp)
+// 	// require.Equal(t, "Failed to execute SQL statement: FOREIGN KEY constraint failed", resp.Data[0])
+
+// 	// val, err = conn.SetSessionSetting(SessionSQLDeferForeignKeys, true)
+// 	// require.Nil(t, err)
+// 	// require.Equal(t, val, true)
+
+// 	// resp, rerr = conn.Eval(deferEval, []interface{}{})
+// 	// require.Nil(t, rerr)
+// 	// require.NotNil(t, resp)
+// 	// require.Equal(t, true, resp.Data[0])
+// }
+
 // runTestMain is a body of TestMain function
 // (see https://pkg.go.dev/testing#hdr-Main).
 // Using defer + os.Exit is not works so TestMain body

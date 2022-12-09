@@ -23,7 +23,8 @@ const (
 	// new SQL tables. Added in Tarantool 2.3.1. Default is `"memtx"`.
 	SessionSQLDefaultEngine SessionSetting = "sql_default_engine"
 	// SessionSQLDeferForeignKeys defines whether foreign-key checks
-	// can wait till commit. Added in Tarantool 2.3.1. Default is `false`.
+	// can wait till commit. Added in Tarantool 2.3.1, dropped
+	// in master commit 14618c4 (possible 2.10.5 or 2.11.0). Default is `false`.
 	SessionSQLDeferForeignKeys SessionSetting = "sql_defer_foreign_keys"
 	// SessionSQLFullColumnNames defines whether full column names is displayed
 	// in SQL result set metadata. Added in Tarantool 2.3.1. Default is `false`.
