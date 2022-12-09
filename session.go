@@ -91,6 +91,39 @@ func sessionSettingValue(k SessionSetting, resp *Response) (interface{}, error) 
 	return tuple[sessionSettingValueField], nil
 }
 
+func sessionSettingsValue(resp *Response) (map[SessionSetting]interface{}, error) {
+	if resp == nil {
+		return nil, fmt.Errorf("unexpected session settings response: got nil")
+	}
+
+	if len(resp.Data) == 0 {
+		return nil, fmt.Errorf("unexpected session settings response: got no rows")
+	}
+
+	val := make(map[SessionSetting]interface{}, len(resp.Data))
+
+	for _, item := range resp.Data {
+		tuple, tok := item.([]interface{})
+		if !tok {
+			return nil, fmt.Errorf("unexpected session settings response format: expected tuple, got %v", item)
+		}
+
+		// (key, value) tuple expected
+		if len(tuple) < 2 {
+			return nil, fmt.Errorf("unexpected session settings response format: too few fields in the tuple (got %v)", tuple)
+		}
+
+		skey, ok := tuple[0].(string)
+		if !ok {
+			return nil, fmt.Errorf("unexpected session settings response key: %v", tuple[0])
+		}
+
+		val[SessionSetting(skey)] = tuple[1]
+	}
+
+	return val, nil
+}
+
 func wrapSessionRequestError(err error) error {
 	if errors.Is(err, ClientError{Code: ErrSpaceNotFound}) {
 		err = fmt.Errorf("session settings are not supported: %w", err)
@@ -123,4 +156,16 @@ func (conn *Connection) SessionSetting(k SessionSetting) (interface{}, error) {
 	}
 
 	return sessionSettingValue(k, resp)
+}
+
+func (conn *Connection) SessionSettings() (map[SessionSetting]interface{}, error) {
+	req := NewSelectRequest(sessionSettingsSpace).
+		Limit(1000)
+
+	resp, err := conn.Do(req).Get()
+	if err != nil {
+		return nil, wrapSessionRequestError(err)
+	}
+
+	return sessionSettingsValue(resp)
 }
