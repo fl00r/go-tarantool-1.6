@@ -159,6 +159,36 @@ func SkipIfSessionSettingsSupported(t *testing.T) {
 	skipIfGreaterOrEqual(t, "session settings", 2, 3, 1)
 }
 
+func SkipIfSessionErrorMarshalingEnabledUnsupported(t *testing.T) {
+	t.Helper()
+
+	skipIfLess(t, "error_marshaling_enabled session setting", 2, 4, 1)
+
+	isLess, err := IsTarantoolVersionLess(2, 10, 0)
+	if err != nil {
+		t.Fatalf("Could not check the Tarantool version")
+	}
+
+	if !isLess {
+		t.Skipf("Skipping test for Tarantool with error_marshaling_enabled session setting dropped support")
+	}
+}
+
+func SkipIfSessionSQLDeferForeignKeysUnsupported(t *testing.T) {
+	t.Helper()
+
+	skipIfLess(t, "sql_defer_foreign_keys session setting", 2, 3, 1)
+
+	isLess, err := IsTarantoolVersionLess(2, 10, 5)
+	if err != nil {
+		t.Fatalf("Could not check the Tarantool version")
+	}
+
+	if !isLess {
+		t.Skipf("Skipping test for Tarantool with sql_defer_foreign_keys session setting dropped support")
+	}
+}
+
 // CheckEqualBoxErrors checks equivalence of tarantool.BoxError objects.
 //
 // Tarantool errors are not comparable by nature:
