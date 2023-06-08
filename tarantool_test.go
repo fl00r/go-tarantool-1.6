@@ -1908,7 +1908,7 @@ func TestSchema(t *testing.T) {
 	if space.Engine != "memtx" {
 		t.Errorf("space 616 engine should be memtx")
 	}
-	if space.FieldsCount != 7 {
+	if space.FieldsCount != 8 {
 		t.Errorf("space 616 has incorrect fields count")
 	}
 
@@ -1918,14 +1918,14 @@ func TestSchema(t *testing.T) {
 	if space.Fields == nil {
 		t.Errorf("space.Fields is nill")
 	}
-	if len(space.FieldsById) != 6 {
+	if len(space.FieldsById) != 7 {
 		t.Errorf("space.FieldsById len is incorrect")
 	}
-	if len(space.Fields) != 6 {
+	if len(space.Fields) != 7 {
 		t.Errorf("space.Fields len is incorrect")
 	}
 
-	var field1, field2, field5, field1n, field5n *Field
+	var field1, field2, field5, field1n, field5n, field_nullable *Field
 	if field1, ok = space.FieldsById[1]; !ok {
 		t.Errorf("field id = 1 was not found")
 	}
@@ -1956,6 +1956,12 @@ func TestSchema(t *testing.T) {
 	}
 	if field2.Type != "string" {
 		t.Errorf("field 2 has incorrect Type")
+	}
+	if field_nullable, ok = space.Fields["nullable"]; !ok {
+		t.Errorf("field name = nullable was not found")
+	}
+	if !field_nullable.IsNullable {
+		t.Errorf("field nullable has incorrect IsNullable")
 	}
 
 	if space.IndexesById == nil {
