@@ -57,6 +57,7 @@ var countOpts = crud.CountOpts{
 
 var getOpts = crud.GetOpts{
 	Timeout: crud.MakeOptUint(timeout),
+	Mode:    "read",
 }
 
 var minOpts = crud.MinOpts{
